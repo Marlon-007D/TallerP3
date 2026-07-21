@@ -65,146 +65,106 @@
   </main>
 </template>
 
-<script>
-const API_URL = 'http://localhost:8081/api/productos';
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import {
+  listarPaginado,
+  crearProducto,
+  actualizarProducto,
+  eliminarProducto
+} from './services/productoService';
 
-function crearAuthorization(usuario, clave) {
-  return `Basic ${btoa(`${usuario}:${clave}`)}`;
-}
+const usuario = ref('admin');
+const clave = ref('Admin_2026!');
+const productos = ref<any[]>([]);
+const mensaje = ref('');
+const page = ref(0);
+const size = 10;
+const totalPages = ref(0);
+const totalElements = ref(0);
+const editando = ref(false);
 
-async function procesarRespuesta(response) {
-  if (response.status === 204) return null;
-  const texto = await response.text();
-  const data = texto ? JSON.parse(texto) : null;
-  if (!response.ok) {
-    const error = new Error(data?.message || `Error HTTP ${response.status}`);
-    error.status = response.status;
-    throw error;
+const formulario = ref({
+  id: null as number | null,
+  nombre: '',
+  descripcion: '',
+  precio: 0,
+  stock: 0,
+  activo: true
+});
+
+onMounted(() => {
+  cargarProductos();
+});
+
+async function cargarProductos() {
+  try {
+    const data = await listarPaginado(usuario.value, clave.value, page.value, size);
+    productos.value = data.content;
+    totalPages.value = data.totalPages;
+    totalElements.value = data.totalElements;
+    mensaje.value = `Página ${data.number + 1} de ${data.totalPages} — ${data.totalElements} productos en total`;
+  } catch (error: any) {
+    manejarError(error);
   }
-  return data;
 }
 
-export default {
-  name: 'App',
-  data() {
-    return {
-      usuario: 'admin',
-      clave: 'Admin_2026!',
-      productos: [],
-      mensaje: '',
-      page: 0,
-      size: 10,
-      totalPages: 0,
-      totalElements: 0,
-      editando: false,
-      formulario: {
-        id: null,
-        nombre: '',
-        descripcion: '',
-        precio: 0,
-        stock: 0,
-        activo: true
-      }
-    };
-  },
-  mounted() {
-    this.cargarProductos();
-  },
-  methods: {
-    async cargarProductos() {
-      try {
-        const response = await fetch(
-          `${API_URL}/paginado?page=${this.page}&size=${this.size}`,
-          { headers: { Authorization: crearAuthorization(this.usuario, this.clave) } }
-        );
-        const data = await procesarRespuesta(response);
-        this.productos = data.content;
-        this.totalPages = data.totalPages;
-        this.totalElements = data.totalElements;
-        this.mensaje = `Página ${data.number + 1} de ${data.totalPages} — ${data.totalElements} productos en total`;
-      } catch (error) {
-        this.manejarError(error);
-      }
-    },
-
-    async guardar() {
-      try {
-        if (this.editando && this.formulario.id) {
-          const response = await fetch(`${API_URL}/${this.formulario.id}`, {
-            method: 'PUT',
-            headers: {
-              Authorization: crearAuthorization(this.usuario, this.clave),
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(this.formulario)
-          });
-          await procesarRespuesta(response);
-          this.mensaje = 'Producto actualizado correctamente.';
-        } else {
-          const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: {
-              Authorization: crearAuthorization(this.usuario, this.clave),
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(this.formulario)
-          });
-          await procesarRespuesta(response);
-          this.mensaje = 'Producto registrado correctamente.';
-        }
-        this.limpiarFormulario();
-        await this.cargarProductos();
-      } catch (error) {
-        this.manejarError(error);
-      }
-    },
-
-    seleccionar(producto) {
-      this.formulario = { ...producto };
-      this.editando = true;
-    },
-
-    async eliminar(producto) {
-      try {
-        const response = await fetch(`${API_URL}/${producto.id}`, {
-          method: 'DELETE',
-          headers: { Authorization: crearAuthorization(this.usuario, this.clave) }
-        });
-        await procesarRespuesta(response);
-        this.mensaje = 'Producto eliminado correctamente.';
-        await this.cargarProductos();
-      } catch (error) {
-        this.manejarError(error);
-      }
-    },
-
-    limpiarFormulario() {
-      this.editando = false;
-      this.formulario = { id: null, nombre: '', descripcion: '', precio: 0, stock: 0, activo: true };
-    },
-
-    paginaAnterior() {
-      if (this.page > 0) {
-        this.page--;
-        this.cargarProductos();
-      }
-    },
-
-    paginaSiguiente() {
-      if (this.page + 1 < this.totalPages) {
-        this.page++;
-        this.cargarProductos();
-      }
-    },
-
-    manejarError(error) {
-      if (error.status === 401) this.mensaje = 'Credenciales incorrectas.';
-      else if (error.status === 403) this.mensaje = 'Se requiere rol ADMIN para esta acción.';
-      else if (error.status === 409) this.mensaje = 'Ya existe un producto con ese nombre.';
-      else this.mensaje = error.message || 'Error inesperado.';
+async function guardar() {
+  try {
+    if (editando.value && formulario.value.id) {
+      await actualizarProducto(formulario.value.id, formulario.value, usuario.value, clave.value);
+      mensaje.value = 'Producto actualizado correctamente.';
+    } else {
+      await crearProducto(formulario.value, usuario.value, clave.value);
+      mensaje.value = 'Producto registrado correctamente.';
     }
+    limpiarFormulario();
+    await cargarProductos();
+  } catch (error: any) {
+    manejarError(error);
   }
-};
+}
+
+function seleccionar(producto: any) {
+  formulario.value = { ...producto };
+  editando.value = true;
+}
+
+async function eliminar(producto: any) {
+  try {
+    await eliminarProducto(producto.id, usuario.value, clave.value);
+    mensaje.value = 'Producto eliminado correctamente.';
+    await cargarProductos();
+  } catch (error: any) {
+    manejarError(error);
+  }
+}
+
+function limpiarFormulario() {
+  editando.value = false;
+  formulario.value = { id: null, nombre: '', descripcion: '', precio: 0, stock: 0, activo: true };
+}
+
+function paginaAnterior() {
+  if (page.value > 0) {
+    page.value--;
+    cargarProductos();
+  }
+}
+
+function paginaSiguiente() {
+  if (page.value + 1 < totalPages.value) {
+    page.value++;
+    cargarProductos();
+  }
+}
+
+function manejarError(error: any) {
+  if (error.status === 401) mensaje.value = 'Credenciales incorrectas.';
+  else if (error.status === 403) mensaje.value = 'Se requiere rol ADMIN para esta acción.';
+  else if (error.status === 409) mensaje.value = 'Ya existe un producto con ese nombre.';
+  else mensaje.value = error.message || 'Error inesperado.';
+}
 </script>
 
 <style>
